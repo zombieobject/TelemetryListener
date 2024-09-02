@@ -5,74 +5,120 @@ import Network
 
 public class TelemetryListener {
     private var listener: NWListener?
+    private var connection: NWConnection?
+    private let queue = DispatchQueue.global(qos: .userInitiated)
+
+    private let receivePort: NWEndpoint.Port = 33740
+    private let sendPort: NWEndpoint.Port = 33739
 
     public init() {
         let params = NWParameters.udp
         params.allowLocalEndpointReuse = true
+        params.allowFastOpen = true
 
         do {
-            listener = try NWListener(using: params, on: 33740)
+            self.listener = try NWListener(using: params, on: receivePort)
         } catch {
             print("Failed to create listener: \(error)")
         }
     }
 
     public func start() {
-        listener?.stateUpdateHandler = { state in
+        self.listener?.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
-                print("Listening on port 33740")
+                print("Listening for UDP packets on port 33740")
+                self?.sendHeartbeat()
             case .failed(let error):
                 print("Listener failed with error: \(error)")
             default:
-                break
+                print("Listener state changed: \(state)")
             }
         }
 
-        listener?.newConnectionHandler = { [weak self] newConnection in
-            self?.handleConnection(newConnection)
+        self.listener?.newConnectionHandler = { newConnection in // weak self
+            print("Listener receiving new connection")
+            //self?.receiveData(on: newConnection)
+            self.createConnection(connection: newConnection)
         }
 
-        listener?.start(queue: .main)
+        self.listener?.start(queue: queue)
     }
 
-    private func handleConnection(_ connection: NWConnection) {
+    private func sendHeartbeat() {
+        let heartbeatData = "A".data(using: .utf8)!
+        let host = NWEndpoint.Host("192.168.2.120")
+        let connection = NWConnection(host: host, port: sendPort, using: .udp)
+        
         connection.stateUpdateHandler = { state in
-            switch state {
+            if state == .ready {
+                connection.send(content: heartbeatData, completion: .contentProcessed { error in
+                    if let error = error {
+                        print("Error sending heartbeat: \(error)")
+                    } else {
+                        print("Heartbeat sent successfully")
+                    }
+                    connection.cancel()
+                })
+            } else if case .failed(let error) = state {
+                print("Heartbeat connection failed: \(error)")
+                connection.cancel()
+            }
+        }
+        
+        connection.start(queue: queue)
+    }
+
+    private func createConnection(connection: NWConnection) {
+        print("create connection called....")
+        self.connection = connection
+        // connection receive logic goes here
+
+        // connection state update handler
+        self.connection?.stateUpdateHandler = { (newState) in
+            switch (newState) {
             case .ready:
-                print("Ready to receive data from \(connection.endpoint)")
-                self.receive(on: connection)
-            case .failed(let error):
-                print("Connection failed: \(error)")
-            case .cancelled:
-                print("Connection cancelled")
+                print("Listener ready to receive message - \(connection)")
+                //self.receive()
+            case .cancelled, .failed:
+                print("Listener failed to receive message - \(connection)")
+                // Cancel the listener, something went wrong
+                self.listener?.cancel()
+                // Announce we are no longer able to listen
+                //self.listening = false
             default:
-                break
+                print("Listener waiting to receive message - \(connection)")
             }
         }
-        connection.start(queue: .main)
+        self.connection?.start(queue: .global())
     }
 
-    private func receive(on connection: NWConnection) {
-        connection.receiveMessage { [weak self] data, context, isComplete, error in
-            if let data = data, !data.isEmpty {
-                let remoteEndpoint = connection.endpoint
-                // Check if the packet comes from the expected source
-                if case let NWEndpoint.hostPort(host: .ipv4(address), port: sourcePort) = remoteEndpoint,
-                   address == IPv4Address("192.168.2.120"),
-                   sourcePort == 57083 {
-                    let message = String(decoding: data, as: UTF8.self)
-                    print("Received message from \(address):\(sourcePort) - \(message)")
-                }
-                // Continue receiving
-                self?.receive(on: connection)
-            } else if let error = error {
-                print("Error receiving message: \(error)")
-            }
-        }
-    }
+//    private func receiveData(on connection: NWConnection) {
+//        connection.receiveMessage { [weak self] content, context, isComplete, error in
+//            if let data = content, !data.isEmpty {
+//                let message = String(decoding: data, as: UTF8.self)
+//                print("Received UDP packet: \(message)")
+//                
+//                // Check source address and port if needed
+//                if let endpoint = connection.currentPath?.remoteEndpoint,
+//                   case let NWEndpoint.hostPort(host, port) = endpoint,
+//                   host.debugDescription == "192.168.2.120",
+//                   port == 57083 {
+//                    print("Packet is from the expected source")
+//                }
+//            }
+//            if let error = error {
+//                print("Error receiving UDP packet: \(error)")
+//            }
+//            // Continue receiving
+//            self?.receiveData(on: connection)
+//        }
+//        
+//        connection.start(queue: queue)
+//    }
 
-    func stop() {
+    public func stop() {
+        print("listener stop called....")
         listener?.cancel()
         listener = nil
     }

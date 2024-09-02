@@ -8,6 +8,7 @@ final class TelemetryListenerTests: XCTestCase {
         listener.start()
 
         // Sleep for 2 minutes (120 seconds) for debugging
-        Thread.sleep(forTimeInterval: 120)
+        Thread.sleep(forTimeInterval: 20)
+        listener.stop()
     }
 }
