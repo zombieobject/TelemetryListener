@@ -1,12 +1,13 @@
 import XCTest
-@testable import TelemetryListener
+import TelemetryListener
 
 final class TelemetryListenerTests: XCTestCase {
     func testExample() throws {
-        // XCTest Documentation
-        // https://developer.apple.com/documentation/xctest
+        // Usage
+        let listener = TelemetryListener()
+        listener.start()
 
-        // Defining Test Cases and Test Methods
-        // https://developer.apple.com/documentation/xctest/defining_test_cases_and_test_methods
+        // Sleep for 2 minutes (120 seconds) for debugging
+        Thread.sleep(forTimeInterval: 120)
     }
 }

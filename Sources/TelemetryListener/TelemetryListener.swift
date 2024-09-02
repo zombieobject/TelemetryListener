@@ -3,10 +3,10 @@
 
 import Network
 
-class UDPListener {
+public class TelemetryListener {
     private var listener: NWListener?
 
-    init() {
+    public init() {
         let params = NWParameters.udp
         params.allowLocalEndpointReuse = true
 
@@ -17,7 +17,7 @@ class UDPListener {
         }
     }
 
-    func start() {
+    public func start() {
         listener?.stateUpdateHandler = { state in
             switch state {
             case .ready:
