@@ -1,15 +1,20 @@
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
 
+import Foundation
 import Network
 
 public class TelemetryListener {
+    public var listening: Bool = true
+    public var messageReceived: Data?
+
     private var listener: NWListener?
     private var connection: NWConnection?
     private let queue = DispatchQueue.global(qos: .userInitiated)
 
     private let receivePort: NWEndpoint.Port = 33740
     private let sendPort: NWEndpoint.Port = 33739
+    private let endpointHost: NWEndpoint.Host = NWEndpoint.Host("192.168.2.120")
 
     public init() {
         let params = NWParameters.udp
@@ -29,8 +34,9 @@ public class TelemetryListener {
             case .ready:
                 print("Listening for UDP packets on port 33740")
                 self?.sendHeartbeat()
-            case .failed(let error):
-                print("Listener failed with error: \(error)")
+            case .cancelled, .failed:
+                print("Listener failed with error")
+                self?.listening = false
             default:
                 print("Listener state changed: \(state)")
             }
@@ -38,7 +44,6 @@ public class TelemetryListener {
 
         self.listener?.newConnectionHandler = { newConnection in // weak self
             print("Listener receiving new connection")
-            //self?.receiveData(on: newConnection)
             self.createConnection(connection: newConnection)
         }
 
@@ -47,9 +52,8 @@ public class TelemetryListener {
 
     private func sendHeartbeat() {
         let heartbeatData = "A".data(using: .utf8)!
-        let host = NWEndpoint.Host("192.168.2.120")
-        let connection = NWConnection(host: host, port: sendPort, using: .udp)
-        
+        let connection = NWConnection(host: endpointHost, port: sendPort, using: .udp)
+
         connection.stateUpdateHandler = { state in
             if state == .ready {
                 connection.send(content: heartbeatData, completion: .contentProcessed { error in
@@ -72,20 +76,26 @@ public class TelemetryListener {
     private func createConnection(connection: NWConnection) {
         print("create connection called....")
         self.connection = connection
-        // connection receive logic goes here
 
-        // connection state update handler
+        // connection receive logic goes here - What's the difference between receive and receiveMessage?
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, context, isComplete, error in
+            if let data = data, !data.isEmpty {
+                print("Received data: \(data)")
+            }
+            if let error = error {
+                print("Failed to receive data: \(error)")
+            }
+        }
+
         self.connection?.stateUpdateHandler = { (newState) in
             switch (newState) {
             case .ready:
                 print("Listener ready to receive message - \(connection)")
-                //self.receive()
+                self.receive()
             case .cancelled, .failed:
                 print("Listener failed to receive message - \(connection)")
-                // Cancel the listener, something went wrong
                 self.listener?.cancel()
-                // Announce we are no longer able to listen
-                //self.listening = false
+                self.listening = false
             default:
                 print("Listener waiting to receive message - \(connection)")
             }
@@ -93,32 +103,28 @@ public class TelemetryListener {
         self.connection?.start(queue: .global())
     }
 
-//    private func receiveData(on connection: NWConnection) {
-//        connection.receiveMessage { [weak self] content, context, isComplete, error in
-//            if let data = content, !data.isEmpty {
-//                let message = String(decoding: data, as: UTF8.self)
-//                print("Received UDP packet: \(message)")
-//                
-//                // Check source address and port if needed
-//                if let endpoint = connection.currentPath?.remoteEndpoint,
-//                   case let NWEndpoint.hostPort(host, port) = endpoint,
-//                   host.debugDescription == "192.168.2.120",
-//                   port == 57083 {
-//                    print("Packet is from the expected source")
-//                }
-//            }
-//            if let error = error {
-//                print("Error receiving UDP packet: \(error)")
-//            }
-//            // Continue receiving
-//            self?.receiveData(on: connection)
-//        }
-//        
-//        connection.start(queue: queue)
-//    }
+    private func receive() {
+        print("receive called....")
+        self.connection?.receiveMessage { data, context, isComplete, error in
+            if let unwrappedError = error {
+                print("Error: NWError received in \(#function) - \(unwrappedError)")
+                return
+            }
+            guard isComplete, let data = data else {
+                print("Error: Received nil Data with context - \(String(describing: context))")
+                return
+            }
+            print("message received is updated")
+            self.messageReceived = data
+            if self.listening {
+                self.receive()
+            }
+        }
+    }
 
     public func stop() {
         print("listener stop called....")
+        self.listening = false
         listener?.cancel()
         listener = nil
     }
